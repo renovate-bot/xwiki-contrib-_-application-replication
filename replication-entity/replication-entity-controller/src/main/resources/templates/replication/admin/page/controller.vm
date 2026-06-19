@@ -139,46 +139,55 @@
     #end
     #set ($replicationDisabled = $currentInstanceControl.level.name() == 'REFERENCE')
 
-    #set ($inputId = "${namePrefix}_replication_instance_type_default")
-    <input type="radio" id="$inputId" name="${namePrefix}_replication_instance_type" value="default" #if($replicationType == 'default')checked#end>
-    <label for="$inputId">$escapetool.xml($services.localization.render('replication.admin.page.type.default'))</label>
-
-    #displayReplicationConfiguration($reference.parent)
-
-    #set ($inputId = "${namePrefix}_replication_instance_type_all")
-    <input type="radio" id="$inputId" name="${namePrefix}_replication_instance_type" value="all" #if($replicationType == 'all')checked#end>
-    <label for="$inputId">$escapetool.xml($services.localization.render('replication.admin.page.type.all'))</label>
-
-    #set ($levelInputId = "${namePrefix}_replication_instance_level")
-    #set ($currentLevel = $replicationInstanceMap.get($instance.uRI).level.name())
-    #set ($directionInputId = "${namePrefix}_replication_instance_direction")
-    #set ($showDirectionSelect = "$!currentLevel" != '')
-    <div class="replication-configuration-container">
-      #selectLevel($currentLevel, $levelInputId)
-      #selectDirection($replicationInstanceMap.get($instance.uRI).direction.name(), $directionInputId, $showDirectionSelect)
+    <div class="box">
+      #set ($inputId = "${namePrefix}_replication_instance_type_default")
+      <input type="radio" id="$inputId" name="${namePrefix}_replication_instance_type" value="default" #if($replicationType == 'default')checked#end>
+      <label for="$inputId">$escapetool.xml($services.localization.render('replication.admin.page.type.default'))</label>
+      <span class="xHint">$escapetool.xml($services.localization.render("replication.admin.page.type.default.${namePrefix}.hint"))</span>
+      #if ($namePrefix == 'space')
+        <br/>
+        #displayReplicationConfiguration($reference.parent)
+      #end
     </div>
 
-    <br/>
-    #set ($inputId = "${namePrefix}_replication_instance_type_single")
-    <input type="radio" id="$inputId" name="${namePrefix}_replication_instance_type" value="single" #if($replicationType == 'single')checked#end>
-    <label for="$inputId">$escapetool.xml($services.localization.render('replication.admin.page.type.single'))</label>
+    <div class="box">
+      #set ($inputId = "${namePrefix}_replication_instance_type_all")
+      <input type="radio" id="$inputId" name="${namePrefix}_replication_instance_type" value="all" #if($replicationType == 'all')checked#end>
+      <label for="$inputId">$escapetool.xml($services.localization.render('replication.admin.page.type.all'))</label>
+      <span class="xHint">$escapetool.xml($services.localization.render('replication.admin.page.type.all.hint'))</span>
 
-    <dl>
-      #foreach($instance in $instances)
-        #set ($levelInputId = "${namePrefix}_replication_instance_level_$foreach.index")
-        #set ($currentLevel = $replicationInstanceMap.get($instance.uRI).level.name())
-        #set ($directionInputId = "${namePrefix}_replication_instance_direction_$foreach.index")
-        #set ($showDirectionSelect = "$!currentLevel" != '')
-        <dt><label for="$inputId">$instance.name (<a href="$instance.uRI">$instance.uRI</a>)</label></dt>
-        <dd>
-          <input type="hidden" name="${namePrefix}_replication_instance_uri_$foreach.index" value="$escapetool.xml($instance.uRI)"/>
-          <div class="replication-configuration-container">
-            #selectLevel($currentLevel, $levelInputId)
-            #selectDirection($replicationInstanceMap.get($instance.uRI).direction.name(), $directionInputId, $showDirectionSelect)
-          </div>
-        </dd>
-      #end
-    </dl>
+      #set ($levelInputId = "${namePrefix}_replication_instance_level")
+      #set ($currentLevel = $replicationInstanceMap.get($instance.uRI).level.name())
+      #set ($directionInputId = "${namePrefix}_replication_instance_direction")
+      #set ($showDirectionSelect = "$!currentLevel" != '')
+      <div class="replication-configuration-container">
+        #selectLevel($currentLevel, $levelInputId)
+        #selectDirection($replicationInstanceMap.get($instance.uRI).direction.name(), $directionInputId, $showDirectionSelect)
+      </div>
+
+      <br/>
+      #set ($inputId = "${namePrefix}_replication_instance_type_single")
+      <input type="radio" id="$inputId" name="${namePrefix}_replication_instance_type" value="single" #if($replicationType == 'single')checked#end>
+      <label for="$inputId">$escapetool.xml($services.localization.render('replication.admin.page.type.single'))</label>
+      <span class="xHint">$escapetool.xml($services.localization.render('replication.admin.page.type.single.hint'))</span>
+
+      <dl>
+        #foreach($instance in $instances)
+          #set ($levelInputId = "${namePrefix}_replication_instance_level_$foreach.index")
+          #set ($currentLevel = $replicationInstanceMap.get($instance.uRI).level.name())
+          #set ($directionInputId = "${namePrefix}_replication_instance_direction_$foreach.index")
+          #set ($showDirectionSelect = "$!currentLevel" != '')
+          <dt><label for="$inputId">$instance.name (<a href="$instance.uRI">$instance.uRI</a>)</label></dt>
+          <dd>
+            <input type="hidden" name="${namePrefix}_replication_instance_uri_$foreach.index" value="$escapetool.xml($instance.uRI)"/>
+            <div class="replication-configuration-container">
+              #selectLevel($currentLevel, $levelInputId)
+              #selectDirection($replicationInstanceMap.get($instance.uRI).direction.name(), $directionInputId, $showDirectionSelect)
+            </div>
+          </dd>
+        #end
+      </dl>
+    </div>
   #else
     #displayReplicationConfiguration($reference)
   #end
@@ -191,12 +200,16 @@
     <fieldset>
       <legend>$escapetool.xml($services.localization.render('replication.admin.page.pageandchildren'))</legend>
 
+      <p>$escapetool.xml($services.localization.render('replication.admin.page.pageandchildren.hint'))</p>
+
       #replicationInstances('space', $instances, $replicationDocument.documentReference.parent)
     </fieldset>
   #end
 
   <fieldset>
     <legend>$escapetool.xml($services.localization.render('replication.admin.page.currentpage'))</legend>
+
+    <p>$escapetool.xml($services.localization.render('replication.admin.page.currentpage.hint'))</p>
 
     #replicationInstances('document', $instances, $replicationDocument.documentReference)
   </fieldset>
