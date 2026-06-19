@@ -41,7 +41,7 @@ public class WikiReplicationAdministrationSectionPage extends AdministrationSect
     private WebElement currentURIInput;
 
     @FindBy(name = "current_save")
-    private WebElement sameButton;
+    private WebElement saveButton;
 
     @FindBy(id = "requested_uri")
     private WebElement requestedInput;
@@ -93,7 +93,7 @@ public class WikiReplicationAdministrationSectionPage extends AdministrationSect
 
     public WikiReplicationAdministrationSectionPage clickSaveButton()
     {
-        this.sameButton.click();
+        this.saveButton.click();
 
         return new WikiReplicationAdministrationSectionPage();
     }
