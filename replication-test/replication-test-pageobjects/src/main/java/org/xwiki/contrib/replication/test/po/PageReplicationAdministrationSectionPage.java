@@ -140,7 +140,7 @@ public class PageReplicationAdministrationSectionPage extends AdministrationSect
             levelElement = getDriver().findElement(By.id(scope + "_replication_instance_level"));
         } else {
             levelElement = getDriver().findElement(
-                By.xpath("//fieldset[input[@id=\"" + getOptionId(scope, toMode(instance)) + "\"]]//dd[input[@value=\""
+                By.xpath("//fieldset/div[input[@id=\"" + getOptionId(scope, toMode(instance)) + "\"]]//dd[input[@value=\""
                     + instance + "\"]]//select[contains(@class, 'replication-level-select')]"));
         }
 
@@ -154,7 +154,7 @@ public class PageReplicationAdministrationSectionPage extends AdministrationSect
             levelElement = getDriver().findElement(By.id(scope + "_replication_instance_direction"));
         } else {
             levelElement = getDriver().findElement(
-                By.xpath("//fieldset[input[@id=\"" + getOptionId(scope, toMode(instance)) + "\"]]//dd[input[@value=\""
+                By.xpath("//fieldset/div[input[@id=\"" + getOptionId(scope, toMode(instance)) + "\"]]//dd[input[@value=\""
                     + instance + "\"]]//select[contains(@class, 'replication-direction-select')]"));
         }
 
