@@ -25,15 +25,17 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import javax.inject.Inject;
 
 import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.slf4j.Logger;
 import org.xwiki.component.annotation.Component;
 import org.xwiki.component.annotation.InstantiationStrategy;
 import org.xwiki.component.descriptor.ComponentInstantiationStrategy;
+import org.xwiki.component.manager.ComponentLifecycleException;
+import org.xwiki.component.phase.Disposable;
 import org.xwiki.contrib.replication.ReplicationException;
 import org.xwiki.contrib.replication.ReplicationInstance;
 import org.xwiki.contrib.replication.ReplicationSenderMessage;
@@ -51,7 +53,7 @@ import org.xwiki.observation.ObservationManager;
  */
 @Component(roles = ReplicationSenderMessageQueue.class)
 @InstantiationStrategy(ComponentInstantiationStrategy.PER_LOOKUP)
-public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQueue<ReplicationSenderMessage>
+public class ReplicationSenderMessageQueue implements Disposable, Runnable
 {
     @Inject
     private ReplicationSenderMessageStore store;
@@ -65,6 +67,9 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
     @Inject
     private ReplicationMessageLogStore logStore;
 
+    @Inject
+    private Logger logger;
+
     /**
      * Used to wait for a ping or a timeout.
      */
@@ -75,7 +80,7 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
      */
     private final Condition pingCondition = this.pingLock.newCondition();
 
-    private final Lock lock = new ReentrantLock();
+    private Thread thread;
 
     private ReplicationInstance instance;
 
@@ -84,6 +89,12 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
     private Throwable lastError;
 
     private Date nextTry;
+
+    private boolean disposed;
+
+    // It is volatile only for the reference, not for its content
+    @SuppressWarnings("java:S3077")
+    private volatile ReplicationSenderMessage headMessage;
 
     /**
      * @return the instance to send messages to
@@ -94,33 +105,90 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
     }
 
     /**
-     * @param instance the instance to send messages to
+     * @return the message currently being handled
+     * @since 2.4.0
      */
-    public void start(ReplicationInstance instance)
+    public ReplicationSenderMessage getCurrentMessage()
+    {
+        return this.headMessage;
+    }
+
+    /**
+     * @param instance the instance to send messages to
+     * @throws ReplicationException when failing to start the queue for the given instance
+     */
+    public void start(ReplicationInstance instance) throws ReplicationException
     {
         this.instance = instance;
         this.store.initialize(instance);
 
-        initializeQueue();
-
-        // Load the queue from disk
-        Queue<ReplicationSenderMessage> messages = this.store.load();
-        messages.forEach(this.queue::add);
+        // Initialize messages handling thread
+        this.thread = new Thread(this);
+        this.thread.setName("Replication message sending to [" + this.instance.getURI() + "]");
+        this.thread.setPriority(Thread.NORM_PRIORITY - 2);
+        // That thread can be stopped any time without really loosing anything
+        this.thread.setDaemon(true);
+        this.thread.start();
     }
 
     @Override
-    protected String getThreadName()
+    public void dispose() throws ComponentLifecycleException
     {
-        return "Replication message sending to [" + this.instance.getURI() + "]";
+        // Mark as disposed
+        this.disposed = true;
+
+        // Cancel and attempt to retry a failing message if any
+        this.headMessage = null;
+
+        // Wakup the thread if it is waiting for a failing message retry
+        wakeUp();
     }
 
     @Override
-    protected void handle(ReplicationSenderMessage message) throws InterruptedException
+    public void run()
+    {
+        while (!this.disposed) {
+            try {
+                this.headMessage = waitForMessage();
+
+                if (this.headMessage == null) {
+                    continue;
+                }
+
+                sendHeadMessage(this.headMessage);
+
+                if (this.headMessage != null) {
+                    this.store.removeHead();
+                    this.headMessage = null;
+                }
+            } catch (InterruptedException e) {
+                this.logger.warn("The replication sending thread has been interrupted");
+
+                // Mark the thread as interrupted
+                this.thread.interrupt();
+
+                // Stop the loop
+                break;
+            } catch (Throwable t) {
+                if (this.headMessage != null) {
+                    this.logger.error(
+                        "An unexpected throwable was thrown while sending message with id [{}] and type [{}]",
+                        this.headMessage.getId(), this.headMessage.getType(), t);
+                } else {
+                    this.logger.error("An unexpected throwable was thrown while handling the replication sender queue",
+                        t);
+                }
+            }
+        }
+    }
+
+    private void sendHeadMessage(ReplicationSenderMessage message) throws InterruptedException
     {
         // Notify that a message is about to be sent
         ReplicationMessageSendingEvent event = new ReplicationMessageSendingEvent();
         this.observation.notify(event, message, this.instance);
         if (event.isCanceled()) {
+            // A listener decided to not send the message
             this.logger.warn("The sending of the message with id [{}] and type [{}] was cancelled: {}", message.getId(),
                 message.getType(), event.getReason());
 
@@ -151,19 +219,7 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
 
                 // Wait before trying to send the message again
 
-                if (this.wait < 60) {
-                    // Double the wait
-                    // Start waiting at 1 minute
-                    this.wait = this.wait == 0 ? 1 : this.wait * 2;
-                } else {
-                    // Wait a maximum of 2h (120 min)
-                    this.wait = 120;
-                }
-
-                // Calculate next try date
-                Calendar calendar = Calendar.getInstance();
-                calendar.add(Calendar.MINUTE, this.wait);
-                this.nextTry = calendar.getTime();
+                this.nextTry = computeNextTry();
 
                 this.logger.warn(
                     "Failed to send replication message with id [{}] and type [{}] to instance [{}],"
@@ -174,14 +230,21 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
                 // Wait
                 this.pingLock.lockInterruptibly();
                 try {
-                    this.pingCondition.awaitUntil(this.nextTry);
+                    boolean awaitReturn = this.pingCondition.awaitUntil(this.nextTry);
+
+                    if (awaitReturn) {
+                        this.logger.debug(
+                            "The wait for message with id [{}] and type [{}] stopped before reaching the timeout",
+                            message.getId(), message.getType());
+                    }
                 } finally {
                     this.pingLock.unlock();
                 }
 
-                // Make sure the current message is still the same (might have been purged while waiting)
-                if (this.currentMessage != message) {
-                    return;
+                // Make sure the current message is still the same (might have been purged or disposed while waiting)
+                if (this.headMessage != message) {
+                    // Stop the loop
+                    break;
                 }
             }
         }
@@ -191,6 +254,47 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
         this.nextTry = null;
         // Reset the last error
         this.lastError = null;
+    }
+
+    private Date computeNextTry()
+    {
+        if (this.wait < 60) {
+            // Double the wait
+            // Start waiting at 1 minute
+            this.wait = this.wait == 0 ? 1 : this.wait * 2;
+        } else {
+            // Wait a maximum of 2h (120 min)
+            this.wait = 120;
+        }
+
+        // Calculate next try date
+        Calendar calendar = Calendar.getInstance();
+        calendar.add(Calendar.MINUTE, this.wait);
+        return calendar.getTime();
+    }
+
+    private FileReplicationSenderMessage waitForMessage() throws InterruptedException
+    {
+        while (!this.disposed) {
+            FileReplicationSenderMessage message = this.store.peek();
+            if (message != null) {
+                return message;
+            }
+
+            this.pingLock.lockInterruptibly();
+            try {
+                message = this.store.peek();
+                if (message != null) {
+                    return message;
+                }
+
+                this.pingCondition.await();
+            } finally {
+                this.pingLock.unlock();
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -209,30 +313,28 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
         return this.nextTry;
     }
 
-    @Override
-    protected void removeFromStore(ReplicationSenderMessage message) throws ReplicationException
-    {
-        this.store.delete(message);
-    }
-
     /**
      * @param message the message to store and add to the queue
      * @return the stored message
      * @throws ReplicationException when failing to store the message
+     * @since 2.4.0
      */
     public FileReplicationSenderMessage add(ReplicationSenderMessage message) throws ReplicationException
     {
-        // Serialize the data
-        FileReplicationSenderMessage storedMessage;
+        FileReplicationSenderMessage fileMessage;
+
+        // Store the message
         try {
-            storedMessage = this.store.store(message);
+            fileMessage = this.store.add(message);
         } catch (Exception e) {
             throw new ReplicationException("Failed to store sender message with id [" + message.getId() + "]", e);
         }
 
-        this.queue.add(storedMessage);
+        // Notify the queue that a new message is available
+        wakeUp();
 
-        return storedMessage;
+        // Return the stored message
+        return fileMessage;
     }
 
     /**
@@ -261,36 +363,35 @@ public class ReplicationSenderMessageQueue extends AbstractReplicationMessageQue
      */
     public void purge()
     {
-        // Remove messages from the queue
-        for (ReplicationSenderMessage message = this.queue.poll(); message != null; message = this.queue.poll()) {
-            // Remove the message from the store
-            removeFromStoreIgnoreException(message);
+        // Remove all messages from the queue store
+        try {
+            this.store.purge();
+        } catch (ReplicationException e) {
+            this.logger.warn("Failed to purge replication sender message queue for instance [{}]",
+                this.instance != null ? this.instance.getURI() : null, e);
         }
 
-        // Remember current message
-        ReplicationSenderMessage message = this.currentMessage;
-
-        if (message != null) {
-            // Reset the current message if any
-            this.currentMessage = null;
-
-            // Remove the current message from the store
-            removeFromStoreIgnoreException(message);
-
-            // And reset the corresponding error if any
-            this.lastError = null;
-
-            // Make sure the queue is not waiting
-            wakeUp();
-        }
+        // Reset state (especially if the thread is currently waiting to re-send a failed message)
+        this.headMessage = null;
+        wakeUp();
     }
 
-    private void removeFromStoreIgnoreException(ReplicationSenderMessage message)
+    /**
+     * @return the number of messages in the queue
+     * @since 2.4.0
+     */
+    public long getSize()
     {
-        try {
-            removeFromStore(message);
-        } catch (ReplicationException e) {
-            this.logger.error("Failed to remove the message from the fielsystem", e);
-        }
+        return this.store.getSize();
+    }
+
+    /**
+     * Load all messages from the filesystem queue in memory and return them.
+     * 
+     * @return the messages in the queue, in memory
+     */
+    public Queue<ReplicationSenderMessage> loadMessages()
+    {
+        return this.store.load();
     }
 }

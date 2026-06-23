@@ -317,7 +317,17 @@ public abstract class AbstractReplicationMessageStore<M extends ReplicationMessa
      */
     public void delete(ReplicationMessage message) throws ReplicationException
     {
-        File messageFolder = getMessageFolder(message.getId());
+        delete(message.getId());
+    }
+
+    /**
+     * @param messageId the identifier of the message to delete
+     * @throws ReplicationException when failing to delete the message
+     * @since 2.4.0
+     */
+    public void delete(String messageId) throws ReplicationException
+    {
+        File messageFolder = getMessageFolder(messageId);
 
         delete(messageFolder);
     }

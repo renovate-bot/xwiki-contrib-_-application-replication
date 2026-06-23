@@ -65,12 +65,12 @@
             #sendkey($instance)
           &lt;/dl&gt;
         &lt;/form&gt;
-        #set ($queueMessages = $services.replication.getQueueMessages($instance))
-        #if ($queueMessages.size() &gt; 0)
+        #set ($queueSize = $services.replication.getQueueSize($instance))
+        #if ($queueSize &gt; 0)
           &lt;form action="$xwiki.relativeRequestURL" method="post"&gt;
             &lt;input type="hidden" name="instance" value="$escapetool.xml($instance.uRI)"/&gt;
 
-            &lt;span class="box warningmessage"&gt;$escapetool.xml($services.localization.render("replication.send.queue.size", [$queueMessages.size()]))&lt;/span&gt;
+            &lt;span class="box warningmessage"&gt;$escapetool.xml($services.localization.render("replication.send.queue.size", [$queueSize]))&lt;/span&gt;
             &lt;button class="btn btn-danger btn-sm" name="replication_purgequeue" title="$escapetool.xml(${services.localization.render('replication.send.queue.purge.title')})"&gt;$escapetool.xml(${services.localization.render('replication.send.queue.purge')})&lt;/button&gt;
           &lt;/form&gt;
         #end

@@ -154,6 +154,7 @@ public class DefaultReplicationSender implements ReplicationSender, Initializabl
     }
 
     private ReplicationSenderMessageQueue getSendQueue(ReplicationInstance instance, boolean create)
+        throws ReplicationException
     {
         ReplicationSenderMessageQueue queue = this.sendQueues.get(instance.getURI());
 
@@ -165,7 +166,7 @@ public class DefaultReplicationSender implements ReplicationSender, Initializabl
         return createSendQueue(instance);
     }
 
-    private ReplicationSenderMessageQueue createSendQueue(ReplicationInstance instance)
+    private ReplicationSenderMessageQueue createSendQueue(ReplicationInstance instance) throws ReplicationException
     {
         synchronized (instance) {
             ReplicationSenderMessageQueue queue = this.sendQueues.get(instance.getURI());
@@ -351,10 +352,13 @@ public class DefaultReplicationSender implements ReplicationSender, Initializabl
     @Override
     public void ping(ReplicationInstance instance)
     {
-        ReplicationSenderMessageQueue queue = getSendQueue(instance, false);
-
-        if (queue != null) {
-            queue.wakeUp();
+        try {
+            ReplicationSenderMessageQueue queue = getSendQueue(instance, false);
+            if (queue != null) {
+                queue.wakeUp();
+            }
+        } catch (ReplicationException e) {
+            this.logger.error("Failed to ping the replication instance [{}]", instance, e);
         }
     }
 

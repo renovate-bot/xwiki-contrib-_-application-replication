@@ -146,6 +146,11 @@ public class ReplicationScriptService implements ScriptService
     }
 
     /**
+     * Load all messages from the filesystem queue in memory and return them.
+     * <p>
+     * This is useful for testing and debugging purposes, but should not be used in production as it can lead to memory
+     * issues if the queue is too big.
+     * 
      * @param instance the replication instance
      * @return the messages queued to be sent to the provided instance
      */
@@ -155,10 +160,25 @@ public class ReplicationScriptService implements ScriptService
 
         ReplicationSenderMessageQueue queue = getQueue(instance);
         if (queue != null) {
-            messages.addAll(queue.getMessages());
+            messages.addAll(queue.loadMessages());
         }
 
         return messages;
+    }
+
+    /**
+     * @param instance the replication instance
+     * @return the message currently being handled
+     * @since 2.4.0
+     */
+    public long getQueueSize(ReplicationInstance instance)
+    {
+        ReplicationSenderMessageQueue queue = getQueue(instance);
+        if (queue != null) {
+            return queue.getSize();
+        }
+
+        return -1;
     }
 
     /**
@@ -228,7 +248,7 @@ public class ReplicationScriptService implements ScriptService
         ReplicationSenderMessageQueue queue = getQueue(instance);
         if (queue != null) {
             queue.purge();
-        }        
+        }
     }
 
     /**
